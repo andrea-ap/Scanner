@@ -41,8 +41,6 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
 - Usa sempre `-r` (aggiorna): disinstallare cancella tutti i dati dell'app.
 - Se compare `INSTALL_PARSE_FAILED_NO_CERTIFICATES`, ricompila e usa `adb install --no-streaming -r ...`.
-- Su Xiaomi/POCO attiva "Installa via USB", altrimenti `INSTALL_FAILED_USER_RESTRICTED`.
-- Antivirus come Norton 360 possono segnalare l'APK debug come "app sospetta" (falso allarme: non è firmato e usa la fotocamera). Scegli Annulla, mai Disinstalla.
 
 L'APK è solo di debug; non c'è ancora una release firmata.
 
