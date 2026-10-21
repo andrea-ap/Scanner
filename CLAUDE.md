@@ -13,6 +13,8 @@ Nessun server: tutto resta sul telefono.
 - Installazione sul telefono (USB debug attivo): `adb install -r app/build/outputs/apk/debug/app-debug.apk`
   - Su Xiaomi/POCO serve "Installa via USB" attivo, altrimenti `INSTALL_FAILED_USER_RESTRICTED`.
   - Usare sempre `-r` (aggiorna): disinstallare cancella tutti i dati dell'app.
+  - Se compare `INSTALL_PARSE_FAILED_NO_CERTIFICATES` ("SHA-256 digest of contents did not verify"): non è un problema di firma, il file arriva alterato via USB (APK di 62 MB in streaming). Rimedio: `adb install --no-streaming -r ...`, oppure cancellare l'APK e ricompilare. Idea per evitarlo: `ndk { abiFilters += "arm64-v8a" }` in `app/build.gradle.kts` per ridurre l'APK (non ancora fatto).
+- **GitHub**: https://github.com/andrea-ap/Scanner (ramo `main`, README con istruzioni di compilazione). `gh` non è installato: le Release si creano a mano dal sito (Releases > Draft a new release, tag `v1.0`, allegare l'APK). L'APK pronto è in `release/Scanner-1.0-debug.apk` (cartella ignorata da git). Gli screenshot `s_*.png`/`screen*.png` non vanno mai pubblicati: mostrano documenti personali.
 - **Norton 360** segnala l'APK debug come "app sospetta" (falso allarme: non firmato, usa la camera). Rispondere Annulla, mai Disinstalla.
 - Il telefono si blocca spesso durante gli screenshot (`adb exec-out screencap -p`): sbloccarlo prima.
 
@@ -53,9 +55,9 @@ Nessun server: tutto resta sul telefono.
 - Blocco app: richiesto all'apertura e dopo più di 30 s in background (camera/scanner/selettori file non lo riattivano). Richiede un blocco schermo sul telefono.
 - Condivisione WhatsApp: `ACTION_SEND_MULTIPLE` con pacchetto `com.whatsapp`; WhatsApp può ignorare il testo quando le foto sono più di una.
 
-## Stato (ultima sessione, 20/10/2026)
-Compilata e installata sul telefono. Viste e verificate con screenshot: home, vista compatta con badge PDF rosso, menu "+", menu a tre puntini, schermata sessione con anteprima PDF (badge pagine + testo), apertura scanner Google, ricerca con testo evidenziato, tocco sul risultato che apre direttamente la foto trovata nel lettore (provato con "sim" in "bonifici"; confermato dall'utente).
-**Non ancora provati a mano**: scansione vera con ritaglio/filtri, PDF unico, swipe per eliminare con Annulla, swipe tra gli allegati nel lettore, salva in Galleria dal lettore, blocco con impronta/PIN, ripristino da backup; "indietro" dal lettore aperto da una ricerca e risultato trovato nella nota.
+## Stato (ultima sessione, 21/10/2026)
+Compilata e installata sul telefono (ultima versione = quella in `release/`). Viste e verificate con screenshot: home, vista compatta con badge PDF rosso, menu "+", menu a tre puntini, schermata sessione con anteprima PDF (badge pagine + testo), apertura scanner Google, ricerca con testo evidenziato, tocco sul risultato che apre direttamente la foto trovata nel lettore (provato con "sim" in "bonifici"; confermato dall'utente), pesi in MB sugli allegati, finestra "PDF unico" con Originale/Compresso (compresso a 1200 px: confermato dall'utente "va bene").
+**Non ancora provati a mano**: scansione vera con ritaglio/filtri, swipe per eliminare con Annulla, swipe tra gli allegati nel lettore, salva in Galleria dal lettore, blocco con impronta/PIN, ripristino da backup; "indietro" dal lettore aperto da una ricerca e risultato trovato nella nota; condivisione reale del PDF compresso su WhatsApp.
 
 ## Idee non ancora fatte
 - Comprimere ancora di più il PDF unico (oggi, 7 foto: originale 11,9 MB, compresso 4,5 MB a 1200 px; a 800 px pesava 2,1 MB ma il testo risultava sbiadito): `PdfDocument` non ricomprime in JPEG, quindi si agisce solo sulla risoluzione (`PDF_SMALL_PHOTO` e `PDF_SMALL_PAGE` = 1200 px in `PdfExport.kt`). `loadBitmap` ora scala esattamente al lato massimo (prima riduceva solo a potenze di 2 e le foto grandi restavano enormi).
