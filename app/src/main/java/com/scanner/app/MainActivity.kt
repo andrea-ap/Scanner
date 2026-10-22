@@ -1,5 +1,6 @@
 package com.scanner.app
 
+import android.content.Intent
 import android.os.Bundle
 import android.os.SystemClock
 import androidx.activity.SystemBarStyle
@@ -25,6 +26,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -42,6 +45,8 @@ class MainActivity : FragmentActivity() {
     private val vm: MainViewModel by viewModels()
 
     private val locked = mutableStateOf(false)
+    /** Allegato da aprire toccando la notifica di un promemoria: (sessione, allegato). */
+    private val openFromReminder = mutableStateOf<Pair<Long, Long>?>(null)
     private var lastStop = 0L
     private var authenticating = false
 
@@ -53,13 +58,26 @@ class MainActivity : FragmentActivity() {
             navigationBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
         )
         locked.value = AppPrefs.lockEnabled(this)
+        // dopo una rotazione lo stesso intent non deve riaprire l'allegato
+        if (savedInstanceState == null) handleReminderIntent(intent)
         setContent {
             ScannerTheme {
                 Surface(color = MaterialTheme.colorScheme.background) {
-                    if (locked.value) LockScreen(onUnlock = { authenticate() }) else AppNav(vm)
+                    if (locked.value) LockScreen(onUnlock = { authenticate() }) else AppNav(vm, openFromReminder)
                 }
             }
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        handleReminderIntent(intent)
+    }
+
+    private fun handleReminderIntent(intent: Intent?) {
+        val photoId = intent?.getLongExtra(Reminders.EXTRA_PHOTO_ID, -1L) ?: -1L
+        val sessionId = intent?.getLongExtra(Reminders.EXTRA_SESSION_ID, -1L) ?: -1L
+        if (photoId >= 0 && sessionId >= 0) openFromReminder.value = sessionId to photoId
     }
 
     override fun onStart() {
@@ -122,8 +140,16 @@ private fun LockScreen(onUnlock: () -> Unit) {
 }
 
 @Composable
-fun AppNav(vm: MainViewModel) {
+fun AppNav(vm: MainViewModel, openFromReminder: MutableState<Pair<Long, Long>?>) {
     val nav = rememberNavController()
+    // tocco sulla notifica di un promemoria: sessione e subito il lettore sull'allegato
+    LaunchedEffect(openFromReminder.value) {
+        val (sessionId, photoId) = openFromReminder.value ?: return@LaunchedEffect
+        openFromReminder.value = null
+        nav.popBackStack("home", inclusive = false)
+        nav.navigate("session/$sessionId")
+        nav.navigate("viewer/$photoId")
+    }
     NavHost(nav, startDestination = "home") {
         composable("home") { HomeScreen(vm, nav) }
         // sessionId = -1 -> nuova sessione dopo lo scatto

@@ -23,6 +23,8 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.IosShare
+import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.SaveAlt
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -73,6 +75,8 @@ fun ViewerScreen(vm: MainViewModel, nav: NavController, photoId: Long) {
     val pagerState = rememberPagerState(initialPage = startIndex) { list.size }
     val current = list.getOrNull(pagerState.currentPage) ?: list.last()
     var confirmDelete by remember { mutableStateOf(false) }
+    var showReminder by remember { mutableStateOf(false) }
+    if (showReminder) ReminderPicker(vm, current) { showReminder = false }
 
     if (confirmDelete) {
         AlertDialog(
@@ -91,7 +95,16 @@ fun ViewerScreen(vm: MainViewModel, nav: NavController, photoId: Long) {
     Column(Modifier.fillMaxSize().background(Color.Black)) {
         TopAppBar(
             title = {
-                Text((if (current.isPdf) "PDF" else "Foto") + "  ·  ${pagerState.currentPage + 1} / ${list.size}")
+                Column {
+                    Text((if (current.isPdf) "PDF" else "Foto") + "  ·  ${pagerState.currentPage + 1} / ${list.size}")
+                    current.reminderAt?.let {
+                        Text(
+                            "Promemoria ${Reminders.format(it)}",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.secondary,
+                        )
+                    }
+                }
             },
             colors = TopAppBarDefaults.topAppBarColors(
                 containerColor = MaterialTheme.colorScheme.primary,
@@ -103,6 +116,13 @@ fun ViewerScreen(vm: MainViewModel, nav: NavController, photoId: Long) {
                 IconButton({ nav.popBackStack() }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Indietro") }
             },
             actions = {
+                IconButton({ showReminder = true }) {
+                    if (current.reminderAt != null) {
+                        Icon(Icons.Default.NotificationsActive, "Promemoria", tint = MaterialTheme.colorScheme.secondary)
+                    } else {
+                        Icon(Icons.Default.Notifications, "Promemoria")
+                    }
+                }
                 IconButton({ shareOne(context, current) }) { Icon(Icons.Default.IosShare, "Condividi") }
                 if (current.isPdf) {
                     IconButton({ openPdf(context, current) }) {

@@ -15,6 +15,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.foundation.background
@@ -39,11 +40,34 @@ fun SessionScreen(vm: MainViewModel, nav: NavController, id: Long) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val session by vm.session(id).collectAsState(initial = null)
-    val photos by vm.photos(id).collectAsState(initial = emptyList())
+    val loadedPhotos by vm.photos(id).collectAsState(initial = null)
+    val photos = loadedPhotos.orEmpty()
 
     var showRename by remember { mutableStateOf(false) }
     var showDelete by remember { mutableStateOf(false) }
     var photoToDelete by remember { mutableStateOf<Photo?>(null) }
+    var reminderFor by remember { mutableStateOf<Photo?>(null) }
+    var menuFor by remember { mutableStateOf<Long?>(null) }
+    val snackbar = remember { SnackbarHostState() }
+
+    // appena si aggiunge un allegato (scansione, foto, PDF, fotocamera) si propone il promemoria
+    var lastSeenId by rememberSaveable(id) { mutableStateOf<Long?>(null) }
+    LaunchedEffect(loadedPhotos) {
+        val list = loadedPhotos ?: return@LaunchedEffect
+        val newest = list.maxByOrNull { it.id }
+        val previous = lastSeenId
+        lastSeenId = newest?.id ?: 0L
+        if (previous != null && newest != null && newest.id > previous) {
+            scope.launch {
+                snackbar.currentSnackbarData?.dismiss() // con più pagine resta solo l'ultimo avviso
+                val r = snackbar.showSnackbar(
+                    if (newest.isPdf) "PDF aggiunto" else "Allegato aggiunto",
+                    actionLabel = "Promemoria", withDismissAction = true, duration = SnackbarDuration.Long,
+                )
+                if (r == SnackbarResult.ActionPerformed) reminderFor = newest
+            }
+        }
+    }
 
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia()) { uris ->
         scope.launch { uris.forEach { vm.addPhotoFromUri(id, it) } }
@@ -135,6 +159,7 @@ fun SessionScreen(vm: MainViewModel, nav: NavController, id: Long) {
             dismissButton = { TextButton({ showDelete = false }) { Text("Annulla") } },
         )
     }
+    reminderFor?.let { p -> ReminderPicker(vm, p) { reminderFor = null } }
     photoToDelete?.let { p ->
         AlertDialog(
             onDismissRequest = { photoToDelete = null },
@@ -149,6 +174,7 @@ fun SessionScreen(vm: MainViewModel, nav: NavController, id: Long) {
         )
     }
     Scaffold(
+        snackbarHost = { SnackbarHost(snackbar) },
         topBar = {
             TopAppBar(
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -279,8 +305,36 @@ fun SessionScreen(vm: MainViewModel, nav: NavController, id: Long) {
                     items(photos, key = { it.id }) { p ->
                         Box(Modifier.aspectRatio(0.85f).clip(RoundedCornerShape(16.dp)).combinedClickable(
                             onClick = { nav.navigate("viewer/${p.id}") },
-                            onLongClick = { photoToDelete = p },
+                            onLongClick = { menuFor = p.id },
                         )) {
+                            DropdownMenu(expanded = menuFor == p.id, onDismissRequest = { menuFor = null }) {
+                                DropdownMenuItem(
+                                    text = { Text(if (p.reminderAt != null) "Modifica promemoria" else "Promemoria…") },
+                                    leadingIcon = { Icon(Icons.Default.NotificationsActive, null) },
+                                    onClick = {
+                                        menuFor = null
+                                        reminderFor = p
+                                    },
+                                )
+                                if (p.reminderAt != null) {
+                                    DropdownMenuItem(
+                                        text = { Text("Rimuovi promemoria") },
+                                        leadingIcon = { Icon(Icons.Default.NotificationsOff, null) },
+                                        onClick = {
+                                            menuFor = null
+                                            vm.setReminder(p, null)
+                                        },
+                                    )
+                                }
+                                DropdownMenuItem(
+                                    text = { Text("Elimina") },
+                                    leadingIcon = { Icon(Icons.Default.Delete, null) },
+                                    onClick = {
+                                        menuFor = null
+                                        photoToDelete = p
+                                    },
+                                )
+                            }
                             AsyncImage(
                                 File(p.displayPath), null, Modifier.fillMaxSize(),
                                 contentScale = ContentScale.Crop, alignment = Alignment.TopCenter,
@@ -292,6 +346,18 @@ fun SessionScreen(vm: MainViewModel, nav: NavController, id: Long) {
                                     .clip(CircleShape).background(Color.Black.copy(alpha = 0.75f))
                                     .padding(horizontal = 8.dp, vertical = 3.dp),
                             )
+                            p.reminderAt?.let { at ->
+                                Row(
+                                    Modifier.align(Alignment.TopStart).padding(8.dp)
+                                        .clip(CircleShape).background(MaterialTheme.colorScheme.secondary)
+                                        .padding(horizontal = 8.dp, vertical = 3.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Icon(Icons.Default.Notifications, null, Modifier.size(14.dp), tint = MaterialTheme.colorScheme.onSecondary)
+                                    Spacer(Modifier.width(3.dp))
+                                    Text(Reminders.format(at), color = MaterialTheme.colorScheme.onSecondary, style = MaterialTheme.typography.labelMedium)
+                                }
+                            }
                             if (p.isPdf) {
                                 val pages by produceState(0, p.filePath) {
                                     value = withContext(Dispatchers.IO) { pdfPageCount(File(p.filePath)) }
