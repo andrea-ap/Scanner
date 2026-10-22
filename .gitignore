@@ -1,0 +1,22 @@
+# Build e cache
+build/
+.gradle/
+.kotlin/
+*.apk
+*.aab
+
+# Percorso dell'SDK della tua macchina
+local.properties
+
+# Screenshot di prova del telefono: contengono documenti personali, non vanno pubblicati
+screen*.png
+s_*.png
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# Firme (mai pubblicare)
+*.jks
+*.keystore
