@@ -1,0 +1,86 @@
+name: APK
+
+# - Tag vX.Y (o VX.Y): compila l'APK firmato e lo pubblica in una GitHub Release.
+# - Pull request: controlla solo che l'app compili (APK non firmato, non pubblicato).
+# - Avvio manuale (Actions > APK > Run workflow): APK firmato come artifact scaricabile.
+on:
+  push:
+    tags: ["v*", "V*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Versione
+        id: version
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            name="${GITHUB_REF_NAME#[vV]}"
+          else
+            name="0.0-dev"
+          fi
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+          # Sempre crescente e maggiore della 1.0 (versionCode 1): Android rifiuta gli aggiornamenti "all'indietro"
+          echo "code=$((GITHUB_RUN_NUMBER + 1))" >> "$GITHUB_OUTPUT"
+
+      - name: Keystore
+        if: github.event_name != 'pull_request'
+        env:
+          SIGNING_KEYSTORE_BASE64: ${{ secrets.SIGNING_KEYSTORE_BASE64 }}
+        run: |
+          if [ -z "$SIGNING_KEYSTORE_BASE64" ]; then
+            echo "::error::Segreto SIGNING_KEYSTORE_BASE64 mancante: vedi la sezione 'Firma' nel README."
+            exit 1
+          fi
+          echo "$SIGNING_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/scanner.keystore"
+          echo "SIGNING_KEYSTORE=$RUNNER_TEMP/scanner.keystore" >> "$GITHUB_ENV"
+
+      - name: Compila APK release
+        env:
+          SIGNING_STORE_PASSWORD: ${{ secrets.SIGNING_STORE_PASSWORD }}
+          SIGNING_KEY_ALIAS: ${{ secrets.SIGNING_KEY_ALIAS }}
+          SIGNING_KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PASSWORD }}
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleRelease --no-daemon \
+            -PversionName=${{ steps.version.outputs.name }} \
+            -PversionCode=${{ steps.version.outputs.code }}
+          apk=$(ls app/build/outputs/apk/release/*.apk | head -1)
+          mkdir -p dist
+          cp "$apk" "dist/Scanner-${{ steps.version.outputs.name }}.apk"
+          ls -l dist
+
+      - name: Verifica firma
+        if: github.event_name != 'pull_request'
+        run: |
+          apksigner=$(ls "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)
+          "$apksigner" verify --print-certs dist/*.apk
+
+      - name: Carica come artifact
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Scanner-${{ steps.version.outputs.name }}
+          path: dist/*.apk
+
+      - name: Pubblica nella Release
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Scanner ${{ steps.version.outputs.name }}
+          files: dist/*.apk
+          generate_release_notes: true
