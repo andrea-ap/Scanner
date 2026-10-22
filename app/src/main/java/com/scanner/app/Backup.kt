@@ -55,7 +55,7 @@ class BackupManager(private val context: Context, private val dao: ScannerDao, p
                 if (!f.exists()) continue
                 files += f
                 if (p.isPdf) File(p.displayPath).takeIf { it.exists() }?.let { files += it }
-                pa.put(JSONObject().put("file", f.name).put("ocrText", p.ocrText).put("createdAt", p.createdAt))
+                pa.put(JSONObject().put("file", f.name).put("ocrText", p.ocrText).put("createdAt", p.createdAt).put("reminderAt", p.reminderAt))
             }
             arr.put(
                 JSONObject().put("name", s.name).put("notes", s.notes)
@@ -150,7 +150,9 @@ class BackupManager(private val context: Context, private val dao: ScannerDao, p
                         src.copyTo(dest, overwrite = true)
                         File(tmp, "$fileName.png").takeIf { it.exists() }?.copyTo(File("${dest.absolutePath}.png"), overwrite = true)
                         dao.insertPhoto(
-                            Photo(sessionId = sid, filePath = dest.absolutePath, ocrText = po.optString("ocrText"), createdAt = po.getLong("createdAt"))
+                            Photo(sessionId = sid, filePath = dest.absolutePath, ocrText = po.optString("ocrText"), createdAt = po.getLong("createdAt"),
+                                // i promemoria già passati non si ripristinano
+                                reminderAt = po.optLong("reminderAt", 0L).takeIf { it > System.currentTimeMillis() })
                         )
                     }
                     imported++

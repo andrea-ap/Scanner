@@ -13,6 +13,7 @@ Package `com.scanner.app` · minSdk 26 · targetSdk 35
 - Condivisione su WhatsApp, PDF unico, altre app, singolo allegato.
 - Lettore a schermo intero con zoom, swipe tra gli allegati, salvataggio in Galleria.
 - Backup e ripristino in zip (cartella Download), blocco app con impronta/PIN, swipe per eliminare con "Annulla".
+- Promemoria facoltativo su ogni foto o PDF: data e ora, notifica che apre direttamente l'allegato. Si imposta dall'avviso che compare dopo l'aggiunta, tenendo premuto l'allegato o con la campanella nel lettore.
 
 ## Stack
 Kotlin, Jetpack Compose (Material3), Room, CameraX, ML Kit (OCR + Document Scanner), Coil, Navigation Compose, Biometric.
@@ -97,12 +98,15 @@ Poi imposta i quattro segreti come sopra con il nuovo file e le tue password. Co
 | `PdfExport.kt`, `PdfUtil.kt` | PDF unico (originale/compresso), rendering pagine PDF |
 | `Share.kt` | WhatsApp, altre app, PDF, singolo allegato |
 | `Backup.kt` | backup zip, ripristino, copia in Galleria |
+| `Reminders.kt` | promemoria: sveglie (AlarmManager), notifica, ripianificazione al riavvio |
+| `ReminderPicker.kt` | scelta di data e ora del promemoria, permessi |
 | `AppPrefs.kt` | impostazioni |
 | `MainActivity.kt` | navigazione, blocco app |
 | `Theme.kt` | palette scura |
 
 ## Dati
 - Foto e PDF in `filesDir/photos/` (privati, non in Galleria).
+- Promemoria in `Photo.reminderAt` (database versione 2, migrazione automatica dalla 1). Permessi: notifiche (Android 13+, chiesto alla prima impostazione) e "Sveglie e promemoria" (Android 12+, facoltativo: senza, l'avviso può arrivare qualche minuto dopo).
 - Backup: `Scanner_backup_AAAAMMGG_HHMM.zip` in Download. Il ripristino non è distruttivo: salta le sessioni con stesso nome e data di creazione. Richiede Android 10+.
 
 ## Note di progetto

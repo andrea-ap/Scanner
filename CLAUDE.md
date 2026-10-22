@@ -22,7 +22,7 @@ Nessun server: tutto resta sul telefono.
 ## Struttura (`app/src/main/java/com/scanner/app/`)
 | File | Contenuto |
 |---|---|
-| `Data.kt` | Room: `Session`, `Photo` (anche i PDF), `ScannerDao`, `AppDatabase` (db `scanner.db`, versione 1) |
+| `Data.kt` | Room: `Session`, `Photo` (anche i PDF), `ScannerDao`, `AppDatabase` (db `scanner.db`, versione 2: `MIGRATION_1_2` aggiunge `photos.reminderAt`) |
 | `MainViewModel.kt` | stato, creazione sessioni, aggiunta foto/PDF, OCR, backup/ripristino |
 | `HomeScreen.kt` | elenco sessioni, etichette, ricerca con frase evidenziata, ordinamento, vista compatta, swipe per eliminare, menu |
 | `SessionScreen.kt` | dettaglio sessione: note, Scansiona/Scatta/Foto/PDF, griglia allegati, condivisione |
@@ -32,6 +32,8 @@ Nessun server: tutto resta sul telefono.
 | `PdfExport.kt`, `PdfUtil.kt` | PDF unico della sessione; rendering pagine PDF |
 | `Share.kt` | WhatsApp, altre app, PDF, singolo allegato, apri PDF |
 | `Backup.kt` | backup zip in Download, ripristino, copia in Galleria |
+| `Reminders.kt` | promemoria sugli allegati: `Reminders` (AlarmManager, notifica) e `ReminderReceiver` (sveglia, riavvio, aggiornamento app, permesso sveglie concesso) |
+| `ReminderPicker.kt` | dialog data → ora del promemoria, richiesta permessi notifiche/sveglie esatte |
 | `AppPrefs.kt` | impostazioni: ordinamento, vista compatta, blocco app |
 | `MainActivity.kt` | navigazione, blocco con impronta/PIN |
 | `Theme.kt` | palette scura verde acqua + giallo |
@@ -45,6 +47,8 @@ Nessun server: tutto resta sul telefono.
 - Eliminare una sessione con swipe la nasconde subito e la cancella solo dopo il timeout della snackbar "Annulla".
 - Backup: `Scanner_backup_AAAAMMGG_HHMM.zip` in Download (`backup.json` + `files/`). Ripristino non distruttivo: salta le sessioni con stesso nome e data di creazione.
 - Backup/Galleria richiedono Android 10+.
+- Promemoria: `Photo.reminderAt` (ms, null = nessuno). Una sveglia per allegato (`requestCode` = id allegato). Quando scatta, `ReminderReceiver` mostra la notifica (canale "promemoria", anteprima dell'allegato) e azzera `reminderAt`. Le sveglie si ripianificano all'avvio dell'app, al riavvio del telefono e dopo un aggiornamento; quelle scadute nel frattempo vengono mostrate subito. Eliminare un allegato o una sessione cancella le sveglie. Il backup salva `reminderAt`; il ripristino ignora quelli già passati.
+- L'OCR aggiorna solo `ocrText` (`setOcrText`), così non sovrascrive un promemoria impostato mentre è in corso.
 
 ## Decisioni di design
 - Intestazione verde scuro con titolo e contatore in giallo; "+" giallo piccolo (44 dp) che si nasconde scorrendo verso il basso.
@@ -54,16 +58,18 @@ Nessun server: tutto resta sul telefono.
 - Peso in MB: ogni allegato nella griglia ha un badge in alto a destra (`formatSize`, in `PdfExport.kt`). Il menu Condividi mostra il peso esatto del "PDF unico", preparato in background (`produceState` con debounce 800 ms in `SessionScreen`). Toccando "PDF unico" si apre una finestra con due scelte e i rispettivi pesi, "Originale" e "Compresso" (`buildSessionPdf(..., compressed = true)`, file `<nome>_compresso.pdf`); si condivide solo dopo la scelta dell'utente.
 - Card grandi con foto, fascia scura in basso per la leggibilità, chip in basso a destra (N PDF in rosso, N foto).
 - Blocco app: richiesto all'apertura e dopo più di 30 s in background (camera/scanner/selettori file non lo riattivano). Richiede un blocco schermo sul telefono.
+- Promemoria (decisioni): AlarmManager e non WorkManager, perché serve l'orario preciso. `setExactAndAllowWhileIdle` se il permesso `SCHEDULE_EXACT_ALARM` è concesso, altrimenti `setAndAllowWhileIdle` (può ritardare di qualche minuto) e si propone di aprire le impostazioni "Sveglie e promemoria". `POST_NOTIFICATIONS` chiesto all'apertura del selettore. Si imposta: dalla snackbar "Allegato aggiunto · Promemoria" dopo ogni aggiunta, dal menu a pressione lunga sull'allegato (Promemoria / Rimuovi promemoria / Elimina: prima la pressione lunga eliminava direttamente), dalla campanella nel lettore. Badge giallo in alto a sinistra nella griglia con "GG/MM HH:mm". Il tocco sulla notifica apre sessione + lettore sull'allegato (extra `photoId`/`sessionId` su `MainActivity`).
 - Condivisione WhatsApp: `ACTION_SEND_MULTIPLE` con pacchetto `com.whatsapp`; WhatsApp può ignorare il testo quando le foto sono più di una.
 
 ## Stato (ultima sessione, 21/10/2026)
 Compilata e installata sul telefono (ultima versione = quella in `release/`). Viste e verificate con screenshot: home, vista compatta con badge PDF rosso, menu "+", menu a tre puntini, schermata sessione con anteprima PDF (badge pagine + testo), apertura scanner Google, ricerca con testo evidenziato, tocco sul risultato che apre direttamente la foto trovata nel lettore (provato con "sim" in "bonifici"; confermato dall'utente), pesi in MB sugli allegati, finestra "PDF unico" con Originale/Compresso (compresso a 1200 px: confermato dall'utente "va bene").
+**Promemoria (22/10/2026)**: scritti ma non ancora compilati né provati sul telefono (l'ambiente cloud non aveva l'Android SDK). Da provare: notifica all'ora giusta, permessi su Android 13/14, tocco sulla notifica con app bloccata, riavvio del telefono.
 **Non ancora provati a mano**: scansione vera con ritaglio/filtri, swipe per eliminare con Annulla, swipe tra gli allegati nel lettore, salva in Galleria dal lettore, blocco con impronta/PIN, ripristino da backup; "indietro" dal lettore aperto da una ricerca e risultato trovato nella nota; condivisione reale del PDF compresso su WhatsApp.
 
 ## Idee non ancora fatte
 - Comprimere ancora di più il PDF unico (oggi, 7 foto: originale 11,9 MB, compresso 4,5 MB a 1200 px; a 800 px pesava 2,1 MB ma il testo risultava sbiadito): `PdfDocument` non ricomprime in JPEG, quindi si agisce solo sulla risoluzione (`PDF_SMALL_PHOTO` e `PDF_SMALL_PAGE` = 1200 px in `PdfExport.kt`). `loadBitmap` ora scala esattamente al lato massimo (prima riduceva solo a potenze di 2 e le foto grandi restavano enormi).
 - Backup automatico settimanale in Download.
-- Promemoria/scadenza su una sessione (fatture da pagare).
+- Promemoria/scadenza su una sessione intera (oggi il promemoria è per singolo allegato); badge campanella anche nelle card della home.
 - Etichetta come categoria separata dal titolo (oggi titolo = etichetta).
 - Anteprime dei PDF ancora più ricche (strisce di miniature delle pagine, "variante C" mostrata come mockup).
 - Release firmata (oggi solo APK debug).

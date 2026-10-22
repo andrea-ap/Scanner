@@ -24,6 +24,8 @@ data class Photo(
     val filePath: String,
     val ocrText: String = "",
     val createdAt: Long,
+    /** Data e ora del promemoria (millisecondi), null se non impostato. */
+    val reminderAt: Long? = null,
 )
 
 val Photo.isPdf: Boolean get() = filePath.endsWith(".pdf", ignoreCase = true)
@@ -57,6 +59,21 @@ interface ScannerDao {
     @Query("SELECT * FROM photos ORDER BY createdAt")
     fun observeAllPhotos(): Flow<List<Photo>>
 
+    @Query("SELECT * FROM photos WHERE id = :id")
+    suspend fun photo(id: Long): Photo?
+
+    @Query("SELECT * FROM sessions WHERE id = :id")
+    suspend fun sessionById(id: Long): Session?
+
+    @Query("SELECT * FROM photos WHERE reminderAt IS NOT NULL")
+    suspend fun photosWithReminder(): List<Photo>
+
+    @Query("UPDATE photos SET reminderAt = :at WHERE id = :id")
+    suspend fun setReminder(id: Long, at: Long?)
+
+    @Query("UPDATE photos SET ocrText = :text WHERE id = :id")
+    suspend fun setOcrText(id: Long, text: String)
+
     @Insert suspend fun insertSession(s: Session): Long
     @Insert suspend fun insertPhoto(p: Photo): Long
     @Update suspend fun updatePhoto(p: Photo)
@@ -75,7 +92,14 @@ interface ScannerDao {
     suspend fun deleteSession(id: Long)
 }
 
-@Database(entities = [Session::class, Photo::class], version = 1, exportSchema = false)
+/** v2: promemoria sugli allegati. */
+private val MIGRATION_1_2 = object : androidx.room.migration.Migration(1, 2) {
+    override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE photos ADD COLUMN reminderAt INTEGER")
+    }
+}
+
+@Database(entities = [Session::class, Photo::class], version = 2, exportSchema = false)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun dao(): ScannerDao
 
@@ -83,6 +107,7 @@ abstract class AppDatabase : RoomDatabase() {
         @Volatile private var instance: AppDatabase? = null
         fun get(context: Context): AppDatabase = instance ?: synchronized(this) {
             instance ?: Room.databaseBuilder(context.applicationContext, AppDatabase::class.java, "scanner.db")
+                .addMigrations(MIGRATION_1_2)
                 .build().also { instance = it }
         }
     }

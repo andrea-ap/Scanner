@@ -42,6 +42,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun defaultName(): String =
         "Sessione " + SimpleDateFormat("dd/MM · HH:mm", Locale.getDefault()).format(Date())
 
+    /** [at] null = rimuove il promemoria. */
+    fun setReminder(p: Photo, at: Long?) = viewModelScope.launch {
+        dao.setReminder(p.id, at)
+        if (at == null) Reminders.cancel(getApplication(), p.id) else Reminders.schedule(getApplication(), p.id, at)
+    }
+
     /** Crea una sessione (con foto opzionale) e restituisce l'id. */
     suspend fun createSession(name: String, photo: File? = null, fromCamera: Boolean = false): Long {
         val now = System.currentTimeMillis()
@@ -52,7 +58,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     private val backups = BackupManager(app, dao, photosDir)
     suspend fun backup(): String = withContext(Dispatchers.IO) { backups.backup() }
-    suspend fun restore(uri: Uri): String = withContext(Dispatchers.IO) { backups.restore(uri) }
+    suspend fun restore(uri: Uri): String = withContext(Dispatchers.IO) {
+        backups.restore(uri).also { Reminders.rescheduleAll(getApplication()) }
+    }
+
+    init {
+        // le sveglie si perdono se l'app viene chiusa forzatamente: si ripianificano all'avvio
+        viewModelScope.launch(Dispatchers.IO) { Reminders.rescheduleAll(app) }
+    }
 
     /** [fromCamera]: la foto viene copiata anche nella Galleria. */
     suspend fun addPhoto(sessionId: Long, file: File, fromCamera: Boolean = false) {
@@ -60,7 +73,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val now = System.currentTimeMillis()
         val id = dao.insertPhoto(Photo(sessionId = sessionId, filePath = file.absolutePath, createdAt = now))
         dao.touch(sessionId, now)
-        viewModelScope.launch(Dispatchers.Default) { runOcr(id, sessionId, file) }
+        viewModelScope.launch(Dispatchers.Default) { runOcr(id, file) }
     }
 
     suspend fun addPhotoFromUri(sessionId: Long, uri: Uri) {
@@ -89,32 +102,29 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val now = System.currentTimeMillis()
         val id = dao.insertPhoto(Photo(sessionId = sessionId, filePath = file.absolutePath, createdAt = now))
         dao.touch(sessionId, now)
-        viewModelScope.launch(Dispatchers.Default) { runPdfOcr(id, sessionId, file) }
+        viewModelScope.launch(Dispatchers.Default) { runPdfOcr(id, file) }
     }
 
     private fun renderPage(file: File, index: Int, width: Int): Bitmap? = renderPdfPage(file, index, width)
 
-    private suspend fun runPdfOcr(photoId: Long, sessionId: Long, file: File) {
+    private suspend fun runPdfOcr(photoId: Long, file: File) {
         try {
             val parts = mutableListOf<String>()
             for (i in 0 until 5) {
                 val bmp = renderPage(file, i, 1400) ?: break
                 parts += recognizer.process(InputImage.fromBitmap(bmp, 0)).await().text
             }
-            val text = parts.joinToString("\n")
-            val p = dao.photosOf(sessionId).firstOrNull { it.id == photoId } ?: return
-            dao.updatePhoto(p.copy(ocrText = text))
+            // aggiorna solo il testo: non sovrascrive un promemoria impostato nel frattempo
+            dao.setOcrText(photoId, parts.joinToString("\n"))
         } catch (e: Exception) {
             // OCR best effort
         }
     }
 
-    private suspend fun runOcr(photoId: Long, sessionId: Long, file: File) {
+    private suspend fun runOcr(photoId: Long, file: File) {
         try {
             val image = InputImage.fromFilePath(getApplication(), Uri.fromFile(file))
-            val text = recognizer.process(image).await().text
-            val p = dao.photosOf(sessionId).firstOrNull { it.id == photoId } ?: return
-            dao.updatePhoto(p.copy(ocrText = text))
+            dao.setOcrText(photoId, recognizer.process(image).await().text)
         } catch (e: Exception) {
             // OCR best effort: la foto resta comunque salvata
         }
@@ -129,6 +139,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun deletePhoto(p: Photo) = viewModelScope.launch {
+        Reminders.cancel(getApplication(), p.id)
         dao.deletePhoto(p)
         withContext(Dispatchers.IO) {
             File(p.filePath).delete()
@@ -137,7 +148,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun deleteSession(id: Long) = viewModelScope.launch {
-        val files = dao.photosOf(id).flatMap { listOf(File(it.filePath), File(it.displayPath)) }
+        val photos = dao.photosOf(id)
+        photos.forEach { Reminders.cancel(getApplication(), it.id) }
+        val files = photos.flatMap { listOf(File(it.filePath), File(it.displayPath)) }
         dao.deleteSession(id)
         withContext(Dispatchers.IO) { files.forEach { it.delete() } }
     }
