@@ -3,6 +3,7 @@ package com.scanner.app
 import android.os.Bundle
 import android.content.Intent
 import android.net.Uri
+import android.widget.Toast
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.width
@@ -211,11 +212,15 @@ private fun ShareTargetDialog(vm: MainViewModel, nav: NavController, sharedUris:
         busy = true
         scope.launch {
             val id = sessionId ?: vm.createSession("")
-            uris.forEach { u ->
-                val mime = context.contentResolver.getType(u).orEmpty()
-                if (mime == "application/pdf" || u.toString().endsWith(".pdf", ignoreCase = true)) vm.addPdfFromUri(id, u)
-                else vm.addPhotoFromUri(id, u)
+            // un file non leggibile (permesso mancante) non deve chiudere l'app
+            val failed = uris.count { u ->
+                runCatching {
+                    val mime = context.contentResolver.getType(u).orEmpty()
+                    if (mime == "application/pdf" || u.toString().endsWith(".pdf", ignoreCase = true)) vm.addPdfFromUri(id, u)
+                    else vm.addPhotoFromUri(id, u)
+                }.isFailure
             }
+            if (failed > 0) Toast.makeText(context, "$failed file non letti", Toast.LENGTH_SHORT).show()
             sharedUris.value = emptyList()
             nav.navigate("session/$id")
         }
