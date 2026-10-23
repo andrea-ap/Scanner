@@ -61,6 +61,7 @@ class BackupManager(private val context: Context, private val dao: ScannerDao, p
                 JSONObject().put("name", s.name).put("notes", s.notes)
                     .put("createdAt", s.createdAt).put("updatedAt", s.updatedAt).put("photos", pa)
                     .apply { s.reminderAt?.let { put("reminderAt", it) } }
+                    .apply { if (s.category.isNotBlank()) put("category", s.category) }
             )
         }
         manifest.put("sessions", arr)
@@ -142,6 +143,7 @@ class BackupManager(private val context: Context, private val dao: ScannerDao, p
                         Session(
                             name = name, notes = so.optString("notes"), createdAt = created,
                             updatedAt = so.getLong("updatedAt"), reminderAt = reminder,
+                            category = so.optString("category"),
                         )
                     )
                     if (reminder != null) scheduleReminder(context, sid, reminder)

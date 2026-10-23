@@ -18,6 +18,9 @@ import java.io.File
 import java.text.SimpleDateFormat
 import java.util.*
 
+/** Pagine di un PDF lette dall'OCR (oltre, il testo non viene cercato). */
+private const val MAX_OCR_PAGES = 40
+
 @OptIn(ExperimentalCoroutinesApi::class, FlowPreview::class)
 class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val dao = AppDatabase.get(app).dao()
@@ -27,9 +30,25 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val query = MutableStateFlow("")
 
     // null = ancora in caricamento (evita il lampo "Nessuna sessione" all'avvio)
-    val sessions: StateFlow<List<Session>?> = query.debounce(200).flatMapLatest { q ->
-        if (q.isBlank()) dao.observeSessions() else dao.search("%${q.trim()}%")
+    val sessions: StateFlow<List<Session>?> = combine(
+        query.debounce(200), dao.observeSessions(), dao.observeAllPhotos(),
+    ) { q, all, photos ->
+        val words = searchWords(q)
+        if (words.isEmpty()) all else {
+            val byId = photos.groupBy { it.sessionId }
+            all.filter { s ->
+                val texts = buildList {
+                    add(foldText(s.name)); add(foldText(s.category)); add(foldText(s.notes))
+                    byId[s.id]?.forEach { add(foldText(it.ocrText)) }
+                }
+                matchesAll(words, texts)
+            }
+        }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+
+    /** Tutte le sessioni, senza filtro di ricerca (per scegliere dove aggiungere file condivisi). */
+    val allSessions: StateFlow<List<Session>> = dao.observeSessions()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val allPhotos: StateFlow<List<Photo>?> = dao.observeAllPhotos()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
@@ -97,15 +116,24 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private suspend fun runPdfOcr(photoId: Long, sessionId: Long, file: File) {
         try {
             val parts = mutableListOf<String>()
-            for (i in 0 until 5) {
+            for (i in 0 until minOf(pdfPageCount(file), MAX_OCR_PAGES)) {
                 val bmp = renderPage(file, i, 1400) ?: break
                 parts += recognizer.process(InputImage.fromBitmap(bmp, 0)).await().text
+                bmp.recycle()
             }
             val text = parts.joinToString("\n")
             val p = dao.photosOf(sessionId).firstOrNull { it.id == photoId } ?: return
             dao.updatePhoto(p.copy(ocrText = text))
         } catch (e: Exception) {
             // OCR best effort
+        }
+    }
+
+    /** Rilegge il testo di un allegato (utile per i PDF aggiunti quando si leggevano solo 5 pagine). */
+    fun rerunOcr(p: Photo) {
+        val f = File(p.filePath)
+        viewModelScope.launch(Dispatchers.Default) {
+            if (p.isPdf) runPdfOcr(p.id, p.sessionId, f) else runOcr(p.id, p.sessionId, f)
         }
     }
 
@@ -122,6 +150,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun rename(id: Long, name: String) = viewModelScope.launch {
         if (name.isNotBlank()) dao.rename(id, name.trim(), System.currentTimeMillis())
+    }
+
+    fun setCategory(id: Long, category: String) = viewModelScope.launch {
+        dao.setCategory(id, category.trim())
     }
 
     fun setNotes(id: Long, notes: String) = viewModelScope.launch {

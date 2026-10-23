@@ -5,7 +5,11 @@ import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
@@ -53,6 +57,10 @@ fun SessionScreen(vm: MainViewModel, nav: NavController, id: Long) {
     var showRename by remember { mutableStateOf(false) }
     var showDelete by remember { mutableStateOf(false) }
     var photoToDelete by remember { mutableStateOf<Photo?>(null) }
+    var photoMenu by remember { mutableStateOf<Photo?>(null) }
+    var ocrShown by remember { mutableStateOf<Photo?>(null) }
+    var showCategory by remember { mutableStateOf(false) }
+    val allSessions by vm.allSessions.collectAsState()
 
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia()) { uris ->
         scope.launch { uris.forEach { vm.addPhotoFromUri(id, it) } }
@@ -227,6 +235,76 @@ fun SessionScreen(vm: MainViewModel, nav: NavController, id: Long) {
             dismissButton = { TextButton({ showDelete = false }) { Text("Annulla") } },
         )
     }
+    ocrShown?.let { p ->
+        AlertDialog(
+            onDismissRequest = { ocrShown = null },
+            title = { Text("Testo letto") },
+            text = {
+                Text(
+                    p.ocrText.ifBlank { "Nessun testo letto. Prova \"Rileggi testo (OCR)\"." },
+                    modifier = Modifier.verticalScroll(rememberScrollState()),
+                )
+            },
+            confirmButton = { TextButton({ ocrShown = null }) { Text("Chiudi") } },
+        )
+    }
+    photoMenu?.let { p ->
+        AlertDialog(
+            onDismissRequest = { photoMenu = null },
+            title = { Text(if (p.isPdf) "PDF" else "Foto") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilledTonalButton(
+                        onClick = {
+                            photoMenu = null
+                            vm.rerunOcr(p)
+                            Toast.makeText(context, "Rileggo il testo, può servire qualche secondo", Toast.LENGTH_SHORT).show()
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text("Rileggi testo (OCR)") }
+                    FilledTonalButton(
+                        onClick = { photoMenu = null; ocrShown = p },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text("Vedi testo letto") }
+                    FilledTonalButton(
+                        onClick = { photoMenu = null; photoToDelete = p },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text("Elimina") }
+                }
+            },
+            confirmButton = {},
+            dismissButton = { TextButton({ photoMenu = null }) { Text("Annulla") } },
+        )
+    }
+    if (showCategory) {
+        var text by remember { mutableStateOf(s.category) }
+        val suggestions = remember(allSessions) {
+            allSessions.map { it.category.trim() }.filter { it.isNotEmpty() }.distinct().sorted()
+        }
+        AlertDialog(
+            onDismissRequest = { showCategory = false },
+            title = { Text("Etichetta") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("Facoltativa. Se vuota, fa da etichetta il titolo.")
+                    OutlinedTextField(
+                        value = text, onValueChange = { text = it }, singleLine = true,
+                        label = { Text("Es. Bollette") }, modifier = Modifier.fillMaxWidth(),
+                    )
+                    if (suggestions.isNotEmpty()) {
+                        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            items(suggestions) { c -> AssistChip(onClick = { text = c }, label = { Text(c) }) }
+                        }
+                    }
+                    if (s.category.isNotBlank()) {
+                        TextButton({ vm.setCategory(id, ""); showCategory = false }) { Text("Togli etichetta") }
+                    }
+                }
+            },
+            confirmButton = { TextButton({ vm.setCategory(id, text); showCategory = false }) { Text("Salva") } },
+            dismissButton = { TextButton({ showCategory = false }) { Text("Annulla") } },
+        )
+    }
     photoToDelete?.let { p ->
         AlertDialog(
             onDismissRequest = { photoToDelete = null },
@@ -341,6 +419,19 @@ fun SessionScreen(vm: MainViewModel, nav: NavController, id: Long) {
                     IconButton({ vm.setReminder(id, null) }) { Icon(Icons.Default.Close, "Togli promemoria") }
                 }
             }
+            Spacer(Modifier.height(2.dp))
+            Row(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable { showCategory = true }
+                    .padding(horizontal = 4.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(Icons.Default.Sell, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    if (s.category.isNotBlank()) "Etichetta: ${s.category}" else "Etichetta · Aggiungi",
+                    Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium,
+                )
+            }
             Spacer(Modifier.height(4.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button({ startScan() }, Modifier.weight(1f), contentPadding = PaddingValues(horizontal = 8.dp)) {
@@ -393,7 +484,7 @@ fun SessionScreen(vm: MainViewModel, nav: NavController, id: Long) {
                     items(photos, key = { it.id }) { p ->
                         Box(Modifier.aspectRatio(0.85f).clip(RoundedCornerShape(16.dp)).combinedClickable(
                             onClick = { nav.navigate("viewer/${p.id}") },
-                            onLongClick = { photoToDelete = p },
+                            onLongClick = { photoMenu = p },
                         )) {
                             AsyncImage(
                                 File(p.displayPath), null, Modifier.fillMaxSize(),

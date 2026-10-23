@@ -15,6 +15,8 @@ data class Session(
     val updatedAt: Long,
     /** Data e ora del promemoria (millisecondi), null se non impostato. */
     val reminderAt: Long? = null,
+    /** Etichetta facoltativa: se vuota fa da etichetta il titolo. */
+    val category: String = "",
 )
 
 @Entity(
@@ -79,6 +81,9 @@ interface ScannerDao {
     @Query("UPDATE sessions SET reminderAt = :ts WHERE id = :id")
     suspend fun setReminder(id: Long, ts: Long?)
 
+    @Query("UPDATE sessions SET category = :category WHERE id = :id")
+    suspend fun setCategory(id: Long, category: String)
+
     @Query("SELECT * FROM sessions WHERE reminderAt IS NOT NULL AND reminderAt > :now")
     suspend fun upcomingReminders(now: Long): List<Session>
 
@@ -92,7 +97,13 @@ private val MIGRATION_1_2 = object : Migration(1, 2) {
     }
 }
 
-@Database(entities = [Session::class, Photo::class], version = 2, exportSchema = false)
+private val MIGRATION_2_3 = object : Migration(2, 3) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE sessions ADD COLUMN category TEXT NOT NULL DEFAULT ''")
+    }
+}
+
+@Database(entities = [Session::class, Photo::class], version = 3, exportSchema = false)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun dao(): ScannerDao
 
@@ -100,7 +111,7 @@ abstract class AppDatabase : RoomDatabase() {
         @Volatile private var instance: AppDatabase? = null
         fun get(context: Context): AppDatabase = instance ?: synchronized(this) {
             instance ?: Room.databaseBuilder(context.applicationContext, AppDatabase::class.java, "scanner.db")
-                .addMigrations(MIGRATION_1_2)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
                 .build().also { instance = it }
         }
     }

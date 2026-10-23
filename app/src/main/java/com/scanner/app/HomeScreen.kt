@@ -88,6 +88,11 @@ fun shortTitle(name: String): String =
 /** Chiave per raggruppare le etichette: "Reti" e "reti " sono la stessa. */
 fun labelKey(name: String): String = shortTitle(name).trim().lowercase()
 
+/** Etichetta della sessione: quella scelta, altrimenti il titolo. */
+fun labelOf(s: Session): String = s.category.trim().ifEmpty { shortTitle(s.name) }
+
+fun labelKeyOf(s: Session): String = labelOf(s).trim().lowercase()
+
 /** Nome di default da data e ora di creazione, es. "Sessione 19/10 · 20:41". */
 fun defaultNameFor(ts: Long): String =
     "Sessione " + SimpleDateFormat("dd/MM · HH:mm", Locale.getDefault()).format(Date(ts))
@@ -129,13 +134,17 @@ private fun snippet(text: String, idx: Int, len: Int): AnnotatedString {
 }
 
 fun findHit(s: Session, photos: List<Photo>, query: String): Hit? {
-    val n = query.trim()
-    if (n.isEmpty()) return null
-    var i = s.notes.indexOf(n, ignoreCase = true)
-    if (i >= 0) return Hit(snippet(s.notes, i, n.length), "Nella nota")
+    val words = searchWords(query)
+    if (words.isEmpty()) return null
+    fun first(text: String): WordHit? {
+        val folded = foldText(text)
+        return words.firstNotNullOfOrNull { findWord(folded, it) }
+    }
+    first(s.notes)?.let { return Hit(snippet(s.notes, it.start, it.len), "Nella nota") }
     for (p in photos) {
-        i = p.ocrText.indexOf(n, ignoreCase = true)
-        if (i >= 0) return Hit(snippet(p.ocrText, i, n.length), if (p.isPdf) "Nel PDF" else "Nella foto", p.id)
+        first(p.ocrText)?.let {
+            return Hit(snippet(p.ocrText, it.start, it.len), if (p.isPdf) "Nel PDF" else "Nella foto", p.id)
+        }
     }
     return null
 }
@@ -165,7 +174,7 @@ fun HomeScreen(vm: MainViewModel, nav: NavController) {
         when (sort) {
             SortMode.RECENT -> list.sortedByDescending { it.updatedAt }
             SortMode.OLDEST -> list.sortedBy { it.updatedAt }
-            SortMode.NAME -> list.sortedBy { labelKey(it.name) }
+            SortMode.NAME -> list.sortedBy { labelKeyOf(it) }
             SortMode.ATTACHMENTS -> list.sortedWith(
                 compareByDescending<Session> { countById[it.id] ?: 0 }.thenByDescending { it.updatedAt }
             )
@@ -188,6 +197,8 @@ fun HomeScreen(vm: MainViewModel, nav: NavController) {
     var showNew by remember { mutableStateOf(false) }
     var menuOpen by remember { mutableStateOf(false) }
     var selectedLabel by remember { mutableStateOf<String?>(null) }
+    var onlyReminder by remember { mutableStateOf(false) }
+    var onlyPdf by remember { mutableStateOf(false) }
     var pendingScan by remember { mutableStateOf<List<Uri>?>(null) }
 
     val restoreLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -354,17 +365,28 @@ fun HomeScreen(vm: MainViewModel, nav: NavController) {
                 }
             } else {
                 // etichette ripetute (stesso titolo su almeno 2 sessioni): quelle uniche non compaiono
-                val repeated = sessions.groupBy { labelKey(it.name) }
+                val repeated = sessions.groupBy { labelKeyOf(it) }
                     .filterValues { it.size >= 2 }
-                    .map { (key, list) -> Triple(key, shortTitle(list.first().name), list.size) }
+                    .map { (key, list) -> Triple(key, labelOf(list.first()), list.size) }
                 if (selectedLabel != null && repeated.none { it.first == selectedLabel }) selectedLabel = null
-                val shown = selectedLabel?.let { sel -> sessions.filter { labelKey(it.name) == sel } } ?: sessions
+                val pdfSessions = photos.filter { it.isPdf }.map { it.sessionId }.toSet()
+                val shown = sessions.filter { s ->
+                    (selectedLabel == null || labelKeyOf(s) == selectedLabel) &&
+                        (!onlyReminder || s.reminderAt != null) &&
+                        (!onlyPdf || s.id in pdfSessions)
+                }
 
-                if (repeated.isNotEmpty()) {
+                run {
                     LazyRow(
                         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
+                        item(key = "f_rem") {
+                            FilterPill("Con promemoria", Icons.Default.Notifications, onlyReminder) { onlyReminder = !onlyReminder }
+                        }
+                        item(key = "f_pdf") {
+                            FilterPill("Con PDF", Icons.Default.PictureAsPdf, onlyPdf) { onlyPdf = !onlyPdf }
+                        }
                         items(repeated, key = { it.first }) { (key, label, n) ->
                             val on = selectedLabel == key
                             Surface(
@@ -407,19 +429,24 @@ fun HomeScreen(vm: MainViewModel, nav: NavController) {
                         }
                     }
                 }
+                if (shown.isEmpty()) {
+                    Box(Modifier.fillMaxSize().padding(top = 40.dp), Alignment.TopCenter) {
+                        Text("Nessuna sessione con questi filtri", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
                 LazyColumn(
                     state = listState,
                     modifier = Modifier.fillMaxSize(),
                     verticalArrangement = Arrangement.spacedBy(if (compact) 10.dp else 16.dp),
                     contentPadding = PaddingValues(
-                        start = 16.dp, end = 16.dp, top = if (repeated.isEmpty()) 16.dp else 4.dp, bottom = 210.dp,
+                        start = 16.dp, end = 16.dp, top = 4.dp, bottom = 210.dp,
                     ),
                 ) {
                     items(shown, key = { it.id }) { s ->
                         val own = photos.filter { it.sessionId == s.id }
                         val hit = if (query.isNotBlank()) findHit(s, own, query) else null
                         val onLabel = {
-                            val key = labelKey(s.name)
+                            val key = labelKeyOf(s)
                             if (repeated.any { it.first == key }) selectedLabel = if (selectedLabel == key) null else key
                         }
                         val open = {
@@ -608,6 +635,26 @@ private fun Header(
     }
 }
 
+/** Filtro rapido attivabile, nello stesso stile delle etichette. */
+@Composable
+private fun FilterPill(text: String, icon: androidx.compose.ui.graphics.vector.ImageVector, on: Boolean, onClick: () -> Unit) {
+    Surface(
+        onClick = onClick,
+        shape = CircleShape,
+        color = if (on) Teal else Color.Transparent,
+        border = BorderStroke(1.dp, if (on) Teal else MaterialTheme.colorScheme.outline),
+    ) {
+        Row(Modifier.padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(icon, null, Modifier.size(16.dp), tint = if (on) DeepTeal else MaterialTheme.colorScheme.onSurfaceVariant)
+            Spacer(Modifier.width(6.dp))
+            Text(
+                text, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold,
+                color = if (on) DeepTeal else MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
 @Composable
 private fun CountChip(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
@@ -666,7 +713,7 @@ private fun SessionCard(s: Session, own: List<Photo>, hit: Hit?, onLabel: () -> 
                 color = Teal,
             ) {
                 Text(
-                    shortTitle(s.name),
+                    labelOf(s),
                     modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp),
                     style = MaterialTheme.typography.labelLarge,
                     fontWeight = FontWeight.SemiBold,
@@ -705,7 +752,7 @@ private fun SessionCard(s: Session, own: List<Photo>, hit: Hit?, onLabel: () -> 
                         )
                     } else {
                         Text(
-                            defaultNameFor(s.createdAt),
+                            if (s.category.isNotBlank()) shortTitle(s.name) else defaultNameFor(s.createdAt),
                             style = MaterialTheme.typography.titleMedium.copy(shadow = shadow),
                             color = Color.White,
                             maxLines = 1,
@@ -756,7 +803,7 @@ private fun SessionRow(s: Session, own: List<Photo>, hit: Hit?, onLabel: () -> U
             Column(Modifier.weight(1f)) {
                 Surface(onClick = onLabel, shape = CircleShape, color = Teal, modifier = Modifier.widthIn(max = 220.dp)) {
                     Text(
-                        shortTitle(s.name),
+                        labelOf(s),
                         modifier = Modifier.padding(horizontal = 10.dp, vertical = 2.dp),
                         style = MaterialTheme.typography.labelMedium,
                         fontWeight = FontWeight.SemiBold,
@@ -776,7 +823,10 @@ private fun SessionRow(s: Session, own: List<Photo>, hit: Hit?, onLabel: () -> U
                         overflow = TextOverflow.Ellipsis,
                     )
                 } else {
-                    Text(defaultNameFor(s.createdAt), style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(
+                        if (s.category.isNotBlank()) shortTitle(s.name) else defaultNameFor(s.createdAt),
+                        style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    )
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(

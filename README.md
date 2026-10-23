@@ -5,12 +5,13 @@ App Android personale per scattare o scansionare foto e PDF, organizzarli in **s
 Package `com.scanner.app` · minSdk 26 · targetSdk 35
 
 ## Funzioni
-- Sessioni con titolo e note; il titolo fa da etichetta (le sessioni con lo stesso titolo si raggruppano).
+- Sessioni con titolo e note. Il titolo fa da etichetta (le sessioni con lo stesso titolo si raggruppano); in più si può impostare un'etichetta a parte (es. "Bollette"). Filtri rapidi "Con promemoria" e "Con PDF".
 - Scansione documenti (ML Kit, ritaglio bordi e filtri), foto con la fotocamera, foto dalla galleria, PDF allegati.
-- OCR offline su foto e prime 5 pagine dei PDF; ricerca su nome, note e testo con frase evidenziata. Toccando un risultato trovato in un allegato si apre subito quell'allegato.
+- OCR offline su foto e sulle pagine dei PDF (fino a 40); tocco lungo su un allegato: "Rileggi testo" o "Vedi testo letto". Ricerca su nome, etichetta, note e testo con frase evidenziata, senza badare agli accenti, con più parole in qualsiasi ordine e tollerando un errore di battitura (utile per gli sbagli dell'OCR). Toccando un risultato trovato in un allegato si apre subito quell'allegato.
 - Anteprima dei PDF con numero di pagine e prima riga di testo; vista compatta con badge rosso per i PDF.
 - Peso in MB su ogni allegato; "PDF unico" con scelta tra versione originale e compressa, con il peso di entrambe.
 - Promemoria facoltativo con notifica su ogni sessione (data e ora), anche dopo il riavvio del telefono. Su alcuni telefoni (es. Xiaomi) serve togliere le restrizioni di batteria all'app e attivare l'avvio automatico.
+- "Condividi" da altre app (galleria, WhatsApp, Gmail…) verso Scanner: foto e PDF si aggiungono a una sessione scelta o a una nuova.
 - Condivisione su WhatsApp, PDF unico, altre app, singolo allegato.
 - Lettore a schermo intero con zoom, swipe tra gli allegati, salvataggio in Galleria.
 - Backup e ripristino in zip (cartella Download), blocco app con impronta/PIN, swipe per eliminare con "Annulla".
